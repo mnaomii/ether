@@ -1,0 +1,2 @@
+# keep LF everywhere: the server is built in WSL, and make breaks on CRLF
+* text=auto eol=lf

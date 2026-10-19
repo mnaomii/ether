@@ -1,0 +1,25 @@
+# Ether test vectors. Format: name | hex bytes. '#' starts a comment.
+# Loaded by server/tests/test_vectors.c and client/tests/test_proto.py.
+# Expected decoded values for each name live in those tests.
+# Session id 0x9A1F0001, time 1700000000000 ms = 00 00 01 8B CF E5 68 00.
+
+# TCP, client -> server
+tcp_login_ana        | 00 00 00 0E 01 00 03 61 6E 61 00 06 70 61 72 6F 6C 61
+tcp_join_1           | 00 00 00 03 03 00 01
+tcp_say_1_salut      | 00 00 00 0A 05 00 01 00 05 73 61 6C 75 74
+# "bună": 4 characters, 5 bytes. len(s) instead of len(s.encode()) fails here.
+tcp_say_2_buna       | 00 00 00 0A 05 00 02 00 05 62 75 6E C4 83
+tcp_bye              | 00 00 00 01 7F
+
+# TCP, server -> client
+tcp_welcome          | 00 00 00 1A 02 9A 1F 00 01 00 02 00 01 00 07 67 65 6E 65 72 61 6C 00 02 00 04 6D 69 73 63
+tcp_msg              | 00 00 00 17 06 00 01 00 00 01 8B CF E5 68 00 00 03 62 6F 62 00 05 73 61 6C 75 74
+tcp_error_bad_pass   | 00 00 00 13 7E 00 07 00 0E 77 72 6F 6E 67 20 70 61 73 73 77 6F 72 64
+
+# UDP
+udp_discover         | 45 54 01 01 00 00 00 00
+udp_discover_reply   | 45 54 01 02 00 00 00 00 00 07 65 74 68 65 72 2D 31 13 BA 00 03
+udp_typing           | 45 54 01 04 9A 1F 00 01 00 01
+udp_ping             | 45 54 01 06 9A 1F 00 01 00 00 01 8B CF E5 68 00
+udp_pong             | 45 54 01 07 9A 1F 00 01 00 00 01 8B CF E5 68 00
+udp_bad_magic        | 00 00 01 01 00 00 00 00

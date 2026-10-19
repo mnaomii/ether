@@ -1,0 +1,18 @@
+# build outputs (rebuild with make)
+server/ether-server
+server/test_vectors
+*.o
+
+# runtime data written by the server
+server/accounts.txt
+server/uploads/
+
+# python caches
+__pycache__/
+.pytest_cache/
+
+# git bash crash dumps
+*.stackdump
+
+# local docs, not part of the repo
+/*.md
