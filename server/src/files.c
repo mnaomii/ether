@@ -42,7 +42,7 @@ struct transfer *transfer_new(struct server *s, int upload, uint32_t file_id)
     t->in_use = 1;
     t->expires_ms = now_ms() + TOKEN_TTL_MS; // 30s availability of request
     t->upload = upload;
-    t->id = free_slot+1;
+    t->id = free_slot+1; // ticket number = slot + 1 (O(1) claim), the token is the secret
     getrandom(&t->token, sizeof(t->token),0);
 
     return t;
@@ -50,12 +50,12 @@ struct transfer *transfer_new(struct server *s, int upload, uint32_t file_id)
 
 struct transfer *transfer_claim(struct server *s, uint32_t id, uint32_t token)
 {
-    if(id - 1 >= MAX_TRANSFERS ) return NULL;
+    if(id - 1 >= MAX_TRANSFERS ) return NULL; // unsigned: id 0 wraps to 4294967295, rejected too
 
     struct transfer *f = &s->xfers[id-1];
     if(now_ms() >= f->expires_ms ) { f->in_use = 0; return NULL;}
     if(f->token == token && f->in_use == 1) {
-        f->in_use = 0;
+        f->in_use = 0; // single use: the same ticket never works twice
         return f;
     }
 
@@ -69,6 +69,7 @@ static void finish_upload(struct server *s, struct client *c){
     struct file_meta *f = file_get(s, c->xfer_file_id);
     if(!f) {
         fclose(c->xfer_fp);
+        c->xfer_fp = NULL; // so drop_client doesn't fclose it a 2nd time
         drop_client(s,c);
         return;
     }
@@ -83,14 +84,14 @@ static void finish_upload(struct server *s, struct client *c){
     put_u32(&w, f->id);
     put_str(&w, f->name);
     put_u64(&w, f->size);
-    put_str(&w, f->from);
+    put_str(&w, f->from); // everything from f: the data conn c never logged in (no nick)
 
 
     // letting everyone know there has been a file uploaded
     broadcast_room(s, f->room_id, NULL, T_FILE_EVT, &w);
     wbuf_free(&w);
 
-    drop_client(s,c);
+    drop_client(s,c); // last: it memsets c
 
 }
 
@@ -117,7 +118,7 @@ void on_data_hello(struct server *s, struct client *c, struct rbuf *r)
     }
 
     char path[32];
-    snprintf(path,sizeof(path),"uploads/%u",f->id);
+    snprintf(path,sizeof(path),"uploads/%u",f->id); // id only, never the client's filename (../../etc/passwd)
 
     if(t->upload){
         FILE* fd = fopen(path,"wb");
@@ -144,7 +145,7 @@ void on_data_hello(struct server *s, struct client *c, struct rbuf *r)
         c->xfer_fp = fd;
         c->st = ST_DOWNLOAD;
 
-        download_refill(s,c);
+        download_refill(s,c); // kick-start: 1st chunk -> outlen > 0 -> POLLOUT -> write_client -> refill...
 
     }
 
@@ -172,7 +173,7 @@ void download_refill(struct server *s, struct client *c)
         return;
     }
 
-    uint8_t buf[65536]; // 64kib
+    uint8_t buf[65536]; // 64kib, only called when outbuf is empty: one chunk in RAM at a time
     size_t want = c->xfer_left < sizeof(buf) ? c->xfer_left : sizeof(buf); // min(left, 64 KiB)
 
     size_t n = fread(buf,1,want,c->xfer_fp); // filling the buffer with max available data

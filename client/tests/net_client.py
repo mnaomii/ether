@@ -479,8 +479,9 @@ async def discover_finds_a_server_by_broadcast():
              f"firewall){busy}. Check discovery against a real server")
     check(got[0] == V["udp_discover"], f"DISCOVER datagram: expected {V['udp_discover'].hex(' ')}, got {got[0].hex(' ')}")
     mine = [s for s in res if s.name == name]
-    check(len(mine) == 1, f"the fake answered twice from one address: expected one ServerInfo named {name!r} "
-                          f"(dedupe by (host, tcp_port)), got {res}")
+    keys = [(s.host, s.tcp_port) for s in mine]          # one per address: a multi-homed host shows up once per adapter
+    check(mine and len(keys) == len(set(keys)), f"the fake answered twice from each address: expected one ServerInfo "
+                                                f"named {name!r} per (host, tcp_port), got {res}")
     s = mine[0]
     check(s.host != "", "ServerInfo.host is empty: fill it from the reply's source address (addr[0])")
     check((s.tcp_port, s.users_online) == (5050, 4), f"expected tcp_port 5050, users_online 4, got {s}")

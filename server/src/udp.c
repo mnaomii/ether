@@ -24,7 +24,7 @@ static void on_discover(struct server *s, const struct sockaddr_in *src)
     if(sid == 0) return NULL;
 
     for(int i = 0 ; i < MAX_CLIENTS; ++i)
-        if(s->clients[i].session_id == sid && s->clients[i].st == ST_CONTROL) 
+        if(s->clients[i].session_id == sid && s->clients[i].st == ST_CONTROL) // st check: free slots have sid 0
             return &s->clients[i];
 
     return NULL;
@@ -37,7 +37,7 @@ static void on_udp_hello(struct server *s, uint32_t session_id, const struct soc
     if(c == NULL) return;
 
     c->has_udp = 1;
-    c->udp_addr = *src;
+    c->udp_addr = *src; // copy the struct: src dies when main's recvfrom loop moves on
 
 }
 
@@ -78,7 +78,7 @@ static void on_typing(struct server *s, uint32_t session_id, struct rbuf *r)
         struct client *c1 = &s->clients[i];
         if(c1 == c || !(c1->rooms_mask & bit) || c1->st != ST_CONTROL || !c1->has_udp)
             continue;
-        udp_send(s,&c1->udp_addr, U_TYPING_EVT, c1->session_id, &f);
+        udp_send(s,&c1->udp_addr, U_TYPING_EVT, c1->session_id, &f); // header carries the receiver's sid
     }
 
     wbuf_free(&f);
@@ -93,7 +93,7 @@ static void on_ping(struct server *s, uint32_t session_id, struct rbuf *r, const
 
     struct wbuf w = {0};
     
-    put_u64(&w, value);
+    put_u64(&w, value); // echo the client's own time back: it computes rtt with its own clock
     udp_send(s, src, U_PONG, session_id, &w);
 
     wbuf_free(&w);
@@ -106,7 +106,7 @@ void handle_udp(struct server *s, const uint8_t *pkt, size_t len, const struct s
     struct rbuf f = {pkt, len , 0};
 
     if(get_u16(&f) != UDP_MAGIC || get_u8(&f) != UDP_VERSION)
-        return;
+        return; // junk (not "ET" v1): ignore silently, no reply
 
     uint8_t type = get_u8(&f);
     uint32_t sid = get_u32(&f);

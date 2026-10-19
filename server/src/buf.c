@@ -52,6 +52,7 @@ void put_u16(struct wbuf *w, uint16_t v)
     int size = 2;
     uint8_t buff[2];
 
+    // big-endian: fill from the last byte, most significant ends up first (0x13BA -> 13 BA)
     for(int idx = size - 1; idx > -1; --idx){
         buff[idx] = (uint8_t)(v & 0xFF);
         v >>= 8;
@@ -110,6 +111,7 @@ uint8_t get_u8(struct rbuf *r)
     size_t size = 1;
     uint8_t payload = 0;
 
+    // err sticks: once set, every later read returns 0 -> check r->err once at the end
     if(r == NULL || r->err || r->p == NULL) return 0;
     if(r->left < size) { r->err = 1; return 0;}
 
@@ -130,7 +132,7 @@ uint16_t get_u16(struct rbuf *r)
     if(r->left < size) { r->err = 1; return 0;}
 
     for(size_t tmp = size; tmp > 0; --tmp){
-        payload = (payload << 8) | *(r->p);
+        payload = (payload << 8) | *(r->p); // make room, OR in the next byte: 13 BA -> 0x13BA
         r->p++;
     }
 
@@ -182,7 +184,7 @@ int get_str(struct rbuf *r, char *out, size_t cap)
     uint16_t size = get_u16(r);
     if(r->err) return -1;
 
-    if(r->left < size || cap <= size) { r->err = 1; return -1;}
+    if(r->left < size || cap <= size) { r->err = 1; return -1;} // cut off, or no room left for '\0'
     
 
     memcpy(out,r->p,size);

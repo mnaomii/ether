@@ -8,11 +8,12 @@
 
  int find_room(struct server *s, uint16_t id){
     for(size_t i = 0; i < s->n_rooms; ++i)
-        if(s->rooms[i].id == id) return i;
+        if(s->rooms[i].id == id) return i; // index = bit number in rooms_mask
 
     return -1;
 }
 
+// MSG payload layout in one place: used by MSG (on_say) and every HISTORY entry (on_join)
 static void put_msg(struct wbuf *w, uint16_t room_id, const struct msg *m){
     put_u16(w, room_id);
     put_u64(w, m->unix_ms);
@@ -49,12 +50,13 @@ static void on_login(struct server *s, struct client *c, struct rbuf *r)
         default: break;
     }
 
+    // after any error above the conn stays ST_NEW: the client may send LOGIN again
     for(int i = 0; i < MAX_CLIENTS; ++i )
         if(s->clients[i].st == ST_CONTROL && strcmp(nick, s->clients[i].nick) == 0)
             {send_error(c,E_NICK_ONLINE, "user already online"); return;}
-    
+
     uint32_t sid = 0;
-    while(sid == 0 ) getrandom(&sid, sizeof(sid), 0);
+    while(sid == 0 ) getrandom(&sid, sizeof(sid), 0); // never 0: 0 = "no session" on UDP
     c->session_id = sid;
 
     strcpy(c->nick,nick);
@@ -102,6 +104,7 @@ static void on_join(struct server *s, struct client *c, struct rbuf *r)
     put_u16(&history,id);
     put_u16(&history,(uint16_t)rm->count);
 
+    // slot of the oldest msg; +HISTORY_LEN keeps it positive before the %
     int msg_start = (rm->head - rm->count + HISTORY_LEN) % HISTORY_LEN;
     for(int i = 0; i < rm->count; ++i){
         put_msg(&history, id, &rm->history[(msg_start+i)%HISTORY_LEN]);
@@ -125,7 +128,7 @@ static void on_join(struct server *s, struct client *c, struct rbuf *r)
             put_str(&users, c->nick);
     }
     
-    send_frame(c, T_HISTORY, &history);
+    send_frame(c, T_HISTORY, &history); // order matters: HISTORY first, then USERS
     send_frame(c, T_USERS, &users);
 
     if( !was_member ) // broadcast join
@@ -192,14 +195,14 @@ static void on_say(struct server *s, struct client *c, struct rbuf *r)
 
     if(r->err) return;
 
-    m.unix_ms = now_ms(); // time of sending the msg
+    m.unix_ms = now_ms(); // time of sending the msg (server time = one order for everyone)
     strcpy(m.from, c->nick); // user who sent the msg
 
     room_push(&s->rooms[idx], &m);
 
     struct wbuf p = {0};
     put_msg(&p, id, &m);
-    broadcast_room(s, id, NULL, T_MSG, &p);
+    broadcast_room(s, id, NULL, T_MSG, &p); // NULL: the sender gets its own msg back too
 
     wbuf_free(&p);
 
@@ -269,6 +272,7 @@ static void on_file_down_req(struct server *s, struct client *c, struct rbuf *r)
 
 
     struct file_meta *f = file_get(s,file_id);
+    // always answer: the client matches replies to requests by order
     if(!f || !f->complete) {
         send_error(c, E_NO_SUCH_FILE, "No such file");
         return;
@@ -304,6 +308,7 @@ void handle_frame(struct server *s, struct client *c, uint8_t type, const uint8_
 {
     struct rbuf f = { payload, len, 0 };
 
+    // first frame decides: LOGIN -> ST_CONTROL, DATA_HELLO -> ST_UPLOAD / ST_DOWNLOAD
     if(c->st == ST_NEW){ // unknown user, just connected
         switch(type){
             case T_LOGIN: on_login(s,c,&f); break;
@@ -320,7 +325,7 @@ void handle_frame(struct server *s, struct client *c, uint8_t type, const uint8_
             case T_FILE_UP_REQ: on_file_up_req(s,c,&f); break;
             case T_FILE_DOWN_REQ: on_file_down_req(s,c,&f); break;
             case T_BYE: on_bye(s,c); break;
-            default: break;
+            default: break; // unknown type: ignore (a newer client may send more)
         }
     }
 }
@@ -329,7 +334,7 @@ void send_frame(struct client *c, uint8_t type, const struct wbuf *payload)
     struct wbuf f = {0};
    
     if(payload){
-        put_u32(&f, 1 + payload->len);
+        put_u32(&f, 1 + payload->len); // length counts the type byte
         put_u8(&f, type);
         put_bytes(&f, payload->data, payload->len);
 
@@ -364,7 +369,7 @@ void broadcast_room(struct server *s, uint16_t room_id, const struct client *exc
     for(size_t i = 0; i < MAX_CLIENTS; ++i){
         struct client *c = &s->clients[i];
         if(c == except || !(c->rooms_mask & bit) || c->st != ST_CONTROL)
-            continue;
+            continue; // skip: excluded one, non-members, data conns, free slots
         send_frame(c,type,payload);
     }
 

@@ -107,6 +107,7 @@ enum acc_result account_login(struct server *s, const char *nick, const char *pa
 
     char *hash = NULL;
     if(acc) { // check pass w/ hash
+        // the stored hash starts with "$6$<salt>$": crypt reuses that salt, same pass -> same hash
         hash = crypt(pass, acc->hash);
         if (hash == NULL || hash[0] == '*') { 
             perror("[ERR:account_login()] failed to hash password");  return ACC_BAD_PASS;
@@ -138,7 +139,7 @@ enum acc_result account_login(struct server *s, const char *nick, const char *pa
 
         acc = &s->accounts[s->n_accounts++];
         strcpy(acc->nick, nick);
-        strcpy(acc->hash, hash);
+        strcpy(acc->hash, hash); // copy now: crypt returns a static buffer the next call overwrites
 
 
 

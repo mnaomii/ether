@@ -17,6 +17,7 @@ static struct server srv;                  // global
 
 uint64_t now_ms(void)
 {
+    // wall clock in ms: msg timestamps, token expiry, typing rate limit
     struct timespec ts;
     clock_gettime(CLOCK_REALTIME, &ts);
     return (uint64_t)ts.tv_sec * 1000 + (uint64_t)ts.tv_nsec / 1000000;
@@ -69,8 +70,8 @@ static int bind_udp(uint16_t port)
 /* tcp_fd readable: accept, make non-blocking, take a free slot in state ST_NEW. */
 static void accept_client(struct server *s)
 {
-    while (1){ 
-        int fd = accept(s->tcp_fd, NULL, NULL); 
+    while (1){ // several may be waiting: accept until EAGAIN (fd < 0)
+        int fd = accept(s->tcp_fd, NULL, NULL);
         if (fd < 0 || fcntl(fd, F_SETFL, O_NONBLOCK) < 0)
            { close(fd); return; }
 
@@ -133,7 +134,8 @@ static void read_client(struct server *s, struct client *c)
         return;
     }
 
-    int n = recv(c->fd, c->inbuf + c->inlen, 
+    // NEW / CONTROL: frames. append to whatever half frame is already waiting
+    int n = recv(c->fd, c->inbuf + c->inlen,
                     sizeof(c->inbuf) - c->inlen, 0); // append to current
 
     if( n == 0 ) { drop_client(s,c); return; } // client closed case
@@ -159,16 +161,16 @@ static void read_client(struct server *s, struct client *c)
 
 
         // decoding the kind of msg
-        handle_frame(s,c,c->inbuf[4], c->inbuf + 5, len - 1);
-        if(c->fd < 0) return;
+        handle_frame(s,c,c->inbuf[4], c->inbuf + 5, len - 1); // [4] = type, +5 = payload
+        if(c->fd < 0) return; // the handler may have dropped c (BYE, bad first frame...)
 
         // memmove - src & dest refer to same ptr, memcpy -> UB
         memmove(c->inbuf,c->inbuf+4+len, c->inlen-4-len);
         c->inlen -= 4 + len;
 
-        if(c->st == ST_UPLOAD){
+        if(c->st == ST_UPLOAD){ // that frame was DATA_HELLO: what's left in inbuf is file data
             size_t n = c->inlen;
-            c->inlen = 0;
+            c->inlen = 0; // reset first: upload_bytes may drop c
 
             if(n > 0) upload_bytes(s,c,c->inbuf, n);
             return;
@@ -188,7 +190,7 @@ static void write_client(struct server *s, struct client *c)
         else { drop_client(s,c); return;}
     }
 
-    memmove(c->outbuf,c->outbuf+n, c->outlen-n); // remove sent items
+    memmove(c->outbuf,c->outbuf+n, c->outlen-n); // remove sent items (partial send: rest waits for next POLLOUT)
     c->outlen -= n;
 
     if(c->st == ST_DOWNLOAD && c->outlen == 0){
@@ -222,13 +224,14 @@ void drop_client(struct server *s, struct client *c)
     if(c->xfer_fp) fclose(c->xfer_fp);
 
     memset(c,0,sizeof(*c));
-    c->fd = -1;
+    c->fd = -1; // slot free again, poll skips -1
 }
 
 void client_send(struct client *c, const void *data, size_t len)
 {
     // prepares the outgoing buffer for sending
-    
+    // only queues: outlen > 0 -> main loop asks for POLLOUT -> write_client sends it
+
     if( c == NULL || len == 0 ) return;
 
     if(c->outbuf == NULL) {
@@ -296,19 +299,20 @@ int main(int argc, char **argv)
 
         for(size_t i = 0; i < MAX_CLIENTS; ++i){
             struct client* c = &srv.clients[i];
-            poll_fd[2+i].fd = c->fd;
+            poll_fd[2+i].fd = c->fd; // free slot = -1, poll ignores it
+            // POLLOUT only when there is something to send, else poll wakes up nonstop (100% cpu)
             poll_fd[2+i].events = POLLIN | ((c->outlen > 0) ? POLLOUT : 0);
         }
 
-        if( poll(poll_fd, 2 + MAX_CLIENTS, -1) < 0 ){
+        if( poll(poll_fd, 2 + MAX_CLIENTS, -1) < 0 ){ // -1: sleep until something happens
             if(errno == EINTR) continue;
             perror("[ERR:main()] poll"); return 1;
         }
         
         
         if(poll_fd[0].revents & POLLIN) accept_client(&srv);
-        if(poll_fd[1].revents & POLLIN) 
-            while(1){
+        if(poll_fd[1].revents & POLLIN)
+            while(1){ // drain every waiting datagram until EAGAIN
                 struct sockaddr_in src = {0};
                 socklen_t size = sizeof(src);
 
@@ -327,7 +331,7 @@ int main(int argc, char **argv)
             if(poll_fd[2+i].revents & (POLLIN | POLLERR | POLLHUP))
                 read_client(&srv,c);
 
-            if(c->fd >= 0 && poll_fd[2+i].revents & POLLOUT)
+            if(c->fd >= 0 && poll_fd[2+i].revents & POLLOUT) // read may have dropped c
                 write_client(&srv,c);
         }
 
