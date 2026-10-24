@@ -46,10 +46,6 @@ python -m ether_core.cli 192.168.1.40 --nick bob
 - **Discovery finds nothing?** Give the server IP directly (CLI argument, or the manual field in the GUI dialog).
 - **CLI commands:** `/join N`, `/leave N`, `/up PATH`, `/down FILE_ID DEST`, `/quit`. Any other text is sent to the current room.
 
-<img src="docs/discovery.png" alt="Connect dialog listing the ether-1 server found by UDP broadcast" width="380">
-
-*The GUI's connect dialog: servers answering the UDP broadcast appear live, with their online count.*
-
 ---
 
 ## Architecture
