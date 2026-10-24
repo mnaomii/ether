@@ -16,3 +16,4 @@ __pycache__/
 
 # local docs, not part of the repo
 /*.md
+!/README.md

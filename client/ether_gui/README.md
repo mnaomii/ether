@@ -50,4 +50,3 @@ Client API used: `EtherClient(on_event=...)`, `await connect(host, port, nick, p
 - Optional "Wire" dock showing raw frames, if the core exposes a frame-log hook.
 - Unit tests for `ChatPanel` HTML rendering and `DiscoveryDialog` validation (pytest-qt).
 - App icon, Windows AppUserModelID, packaging (PyInstaller).
-- Not run against a real server yet. Smoke-test `--demo` on Windows first.
